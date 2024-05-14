@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 
 #define BUFSIZE 512
+#define MSGSIZE 1000
 
 /**
  * function: receive and analize the answer from the server
@@ -189,15 +190,34 @@ int main (int argc, char *argv[]) {
 
     // arguments checking
 
+    if(argc != 3) return -1;
+
     // create socket and check for errors
-    
+
+    sd = socket(PF_INET, SOCK_STREAM, 0);
+
     // set socket data    
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(atoi(argv[2]));
+    if(inet_pton(AF_INET, argv[1], &(addr.sin_addr)) <= 0) return -1;
+    memset(&(addr.sin_zero), 0, 8);
+    
+    bind(sd, (struct sockaddr *)&addr, sizeof(addr));
 
     // connect and check for errors
 
+    if(connect(sd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ){
+        perror("Le erramos en la conexion muchachos");
+        close(sd);
+        return -1;
+    }
+
     // if receive hello proceed with authenticate and operate if not warning
-
+    char loQueMeMandaElServer[MSGSIZE];
+    // No tengo idea que va en la parte de las banderas
+    recv(sd, loQueMeMandaElServer, MSGSIZE, MSG_PEEK);
     // close socket
-
+    close(sd);
     return 0;
 }
