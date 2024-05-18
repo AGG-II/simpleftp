@@ -12,11 +12,15 @@
 #define BUFSIZE 512
 #define MSGSIZE 1000
 
+// Codes:
+#define USREXISTS 331
+#define PASSOK 230
+
 /**
  * function: receive and analize the answer from the server
  * sd: socket descriptor
  * code: three leter numerical code to check if received
- * text: normally NULL but if a pointer if received as parameter
+ * text: normally NULL but if a pointer is received as parameter
  *       then a copy of the optional message from the response
  *       is copied
  * return: result of code checking
@@ -27,6 +31,7 @@ bool recv_msg(int sd, int code, char *text) {
 
     // receive the answer
 
+    recv_s = recv(sd, buffer, BUFSIZE, NULL);
 
     // error checking
     if (recv_s < 0) warn("error receiving data");
@@ -49,6 +54,7 @@ bool recv_msg(int sd, int code, char *text) {
  **/
 void send_msg(int sd, char *operation, char *param) {
     char buffer[BUFSIZE] = "";
+    int send_s;
 
     // command formating
     if (param != NULL)
@@ -57,6 +63,9 @@ void send_msg(int sd, char *operation, char *param) {
         sprintf(buffer, "%s\r\n", operation);
 
     // send command and check for errors
+
+    send_s = send(sd, buffer,sizeof(buffer),0);
+    if (send_s < 0) warn("error sending data");
 
 }
 
@@ -77,33 +86,50 @@ char * read_input() {
  * sd: socket descriptor
  **/
 void authenticate(int sd) {
-    char *input, desc[100];
-    int code;
+    char *input, desc[BUFSIZE];
+    bool authenticated = false;
 
+    do{
     // ask for user
     printf("username: ");
     input = read_input();
 
     // send the command to the server
     
-    // relese memory
+    send_msg(sd, input, NULL);
+
+    // release memory
     free(input);
 
     // wait to receive password requirement and check for errors
 
+    if(recv_msg(sd, USREXISTS, desc)){
+    printf("%s\n", desc);
+    authenticated = true;
+    }
 
+    }while(!authenticated);
+    authenticated = false;
+
+    do{
     // ask for password
     printf("passwd: ");
     input = read_input();
 
     // send the command to the server
 
+    send_msg(sd, input, NULL);
 
     // release memory
     free(input);
-
+    
     // wait for answer and process it and check for errors
+    if(recv_msg(sd, PASSOK, desc)){
+        authenticated = true;
+        printf("%s\n", desc);
+    }
 
+    }while(!authenticated);
 }
 
 /**
@@ -195,6 +221,8 @@ int main (int argc, char *argv[]) {
     // create socket and check for errors
 
     sd = socket(PF_INET, SOCK_STREAM, 0);
+    // Si el socket no se pudo crear
+    if(sd == -1) perror("Socket error\n");
 
     // set socket data    
 
@@ -214,9 +242,8 @@ int main (int argc, char *argv[]) {
     }
 
     // if receive hello proceed with authenticate and operate if not warning
-    char loQueMeMandaElServer[MSGSIZE];
-    // No tengo idea que va en la parte de las banderas
-    recv(sd, loQueMeMandaElServer, MSGSIZE, MSG_PEEK);
+    authenticate(sd);
+    
     // close socket
     close(sd);
     return 0;
