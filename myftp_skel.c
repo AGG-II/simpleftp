@@ -12,9 +12,17 @@
 #define BUFSIZE 512
 #define MSGSIZE 1000
 
+//Operations:
+#define RETRIEVE "RETR"
+#define QUIT "QUIT"
+
 // Codes:
+#define HELLOMSG 220
 #define USREXISTS 331
 #define PASSOK 230
+#define FILEXISTS 299
+#define TRNSFRCMPL 226
+#define GDBY 221 
 
 /**
  * function: receive and analize the answer from the server
@@ -70,6 +78,17 @@ void send_msg(int sd, char *operation, char *param) {
 }
 
 /**
+ * function: recieve a file from the server
+ * sd: socket descriptor
+ * file: the file in question
+*/
+void recv_file(int sd, FILE* file, long int file_size){
+    char buffer[BUFSIZE];
+    int recv_size;
+    // Preguntar
+}
+
+/**
  * function: simple input from keyboard
  * return: input without ENTER key
  **/
@@ -96,7 +115,7 @@ void authenticate(int sd) {
 
     // send the command to the server
     
-    send_msg(sd, input, NULL);
+    send_msg(sd, "USER", input);
 
     // release memory
     free(input);
@@ -104,11 +123,12 @@ void authenticate(int sd) {
     // wait to receive password requirement and check for errors
 
     if(recv_msg(sd, USREXISTS, desc)){
-    printf("%s\n", desc);
-    authenticated = true;
+        authenticated = true;
     }
+    printf("%s\n", desc);
 
     }while(!authenticated);
+
     authenticated = false;
 
     do{
@@ -118,7 +138,7 @@ void authenticate(int sd) {
 
     // send the command to the server
 
-    send_msg(sd, input, NULL);
+    send_msg(sd, "PASS", input);
 
     // release memory
     free(input);
@@ -126,8 +146,8 @@ void authenticate(int sd) {
     // wait for answer and process it and check for errors
     if(recv_msg(sd, PASSOK, desc)){
         authenticated = true;
-        printf("%s\n", desc);
     }
+    printf("%s\n", desc);
 
     }while(!authenticated);
 }
@@ -138,29 +158,40 @@ void authenticate(int sd) {
  * file_name: file name to get from the server
  **/
 void get(int sd, char *file_name) {
-    char desc[BUFSIZE], buffer[BUFSIZE];
-    int f_size, recv_s, r_size = BUFSIZE;
+    char desc[BUFSIZE], buffer[BUFSIZE], text[MSGSIZE];
+    long int f_size;
     FILE *file;
 
     // send the RETR command to the server
 
+    send_msg(sd, RETRIEVE, file_name);
+
     // check for the response
+
+    if(!recv_msg(sd, FILEXISTS, buffer)){
+        warn(buffer);
+        return;
+    }
 
     // parsing the file size from the answer received
     // "File %s size %ld bytes"
-    sscanf(buffer, "File %*s size %d bytes", &f_size);
+    sscanf(buffer, "File %*s size %ld bytes", &f_size);
 
     // open the file to write
     file = fopen(file_name, "w");
 
     //receive the file
 
-
+    recv_file(sd, file, f_size);
 
     // close the file
     fclose(file);
 
     // receive the OK from the server
+    if(!recv_msg(sd, TRNSFRCMPL, text))
+        warn(text);
+    else
+        printf("%s\n", text);
 
 }
 
@@ -169,10 +200,14 @@ void get(int sd, char *file_name) {
  * sd: socket descriptor
  **/
 void quit(int sd) {
-    // send command QUIT to the client
-
+    char text[BUFSIZE];
+    // send command QUIT to the server
+    send_msg(sd, QUIT, NULL);
     // receive the answer from the server
-
+    if(recv_msg(sd, GDBY, text))
+        perror(text);
+    else
+        printf("%s\n", text);
 }
 
 /**
@@ -188,7 +223,7 @@ void operate(int sd) {
         if (input == NULL)
             continue; // avoid empty input
         op = strtok(input, " ");
-        // free(input);
+        
         if (strcmp(op, "get") == 0) {
             param = strtok(NULL, " ");
             get(sd, param);
@@ -213,6 +248,7 @@ void operate(int sd) {
 int main (int argc, char *argv[]) {
     int sd;
     struct sockaddr_in addr;
+    char hello_msg[BUFSIZE];
 
     // arguments checking
 
@@ -226,23 +262,33 @@ int main (int argc, char *argv[]) {
 
     // set socket data    
 
-    addr.sin_family = AF_INET;
+    // No es realmente necesario
+
+    /*addr.sin_family = AF_INET;
     addr.sin_port = htons(atoi(argv[2]));
     if(inet_pton(AF_INET, argv[1], &(addr.sin_addr)) <= 0) return -1;
     memset(&(addr.sin_zero), 0, 8);
     
-    bind(sd, (struct sockaddr *)&addr, sizeof(addr));
+    bind(sd, (struct sockaddr *)&addr, sizeof(addr));*/
 
     // connect and check for errors
 
     if(connect(sd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ){
-        perror("Le erramos en la conexion muchachos");
+        perror("Conection failed");
         close(sd);
         return -1;
     }
 
     // if receive hello proceed with authenticate and operate if not warning
+    if(recv_msg(sd, HELLOMSG, hello_msg)){
+        printf("%s\n", hello_msg);
+    } else {
+        close(sd);
+        errx(1, "Connection unsuccessful\n");
+    }
+
     authenticate(sd);
+    operate(sd);
     
     // close socket
     close(sd);

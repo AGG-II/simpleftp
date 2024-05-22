@@ -43,7 +43,7 @@ bool recv_cmd(int sd, char *operation, char *param) {
 
 
     // expunge the terminator characters from the buffer
-    buffer[strcspn(buffer, "\r\n")] = 0;
+    buffer[strcspn(buffer, "\r\n")] = '\0';
 
     // complex parsing of the buffer
     // extract command receive in operation if not set \0
