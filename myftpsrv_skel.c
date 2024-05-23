@@ -216,19 +216,51 @@ int main (int argc, char *argv[]) {
     int master_sd, slave_sd;
     struct sockaddr_in master_addr, slave_addr;
 
+
     // create server socket and check errors
+    memset(&master_addr, 0, sizeof master_sd);
+    master_addr.sin_family = AF_INET;
+    master_addr.sin_addr.s_addr = INADDR_ANY;
+    master_addr.sin_port = htons(atoi(argv[1]));
+
     
+    master_sd = socket(PF_INET, SOCK_STREAM, 0);
+    if(master_sd == -1) {
+        perror("Socket error\n");
+        return -1;
+    }
     // bind master socket and check errors
 
+    if(bind(master_sd, (struct sockaddr *)&master_addr, sizeof(master_addr))){
+        close(master_sd);
+        errx(1, "Failed to bind master socket");
+    }
+
     // make it listen
+
+    if(listen(master_sd, 5) < 0){
+        close(master_sd);
+        errx(1, "ERROR while trying to listen.\n");
+    }
 
     // main loop
     while (true) {
         // accept connectiones sequentially and check errors
 
+        slave_sd = accept(master_sd, (struct sockaddr *) &slave_addr, (socklen_t*)sizeof(slave_addr));
+        if(!fork()){
+        close(master_sd);
         // send hello
-
+        send_ans(slave_sd, MSG_220);
         // operate only if authenticate is true
+        if(authenticate(slave_sd)){
+            operate(slave_sd);
+        }else{
+            close(slave_sd);
+            return 0;
+        }
+
+        }
     }
 
     // close server socket

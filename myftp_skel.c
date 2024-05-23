@@ -39,7 +39,7 @@ bool recv_msg(int sd, int code, char *text) {
 
     // receive the answer
 
-    recv_s = recv(sd, buffer, BUFSIZE, NULL);
+    recv_s = recv(sd, buffer, BUFSIZE, 0);
 
     // error checking
     if (recv_s < 0) warn("error receiving data");
@@ -252,32 +252,38 @@ int main (int argc, char *argv[]) {
 
     // arguments checking
 
-    if(argc != 3) return -1;
+    if (argc < 3) {
+        errx(1, "Port expected as argument");
+    } else if (argc > 3) {
+        errx(1, "Too many arguments");
+    }
 
     // create socket and check for errors
 
     sd = socket(PF_INET, SOCK_STREAM, 0);
     // Si el socket no se pudo crear
-    if(sd == -1) perror("Socket error\n");
+    if(sd == -1) {
+        perror("Socket error\n");
+        return -1;
+    }
 
     // set socket data    
 
-    // No es realmente necesario
 
-    /*addr.sin_family = AF_INET;
-    addr.sin_port = htons(atoi(argv[2]));
+    addr.sin_family = AF_INET;
     if(inet_pton(AF_INET, argv[1], &(addr.sin_addr)) <= 0) return -1;
+    addr.sin_port = htons(atoi(argv[2]));
     memset(&(addr.sin_zero), 0, 8);
-    
-    bind(sd, (struct sockaddr *)&addr, sizeof(addr));*/
 
     // connect and check for errors
+
 
     if(connect(sd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ){
         perror("Conection failed");
         close(sd);
         return -1;
     }
+
 
     // if receive hello proceed with authenticate and operate if not warning
     if(recv_msg(sd, HELLOMSG, hello_msg)){
@@ -286,7 +292,6 @@ int main (int argc, char *argv[]) {
         close(sd);
         errx(1, "Connection unsuccessful\n");
     }
-
     authenticate(sd);
     operate(sd);
     
