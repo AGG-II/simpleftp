@@ -106,9 +106,7 @@ char * read_input() {
  **/
 void authenticate(int sd) {
     char *input, desc[BUFSIZE];
-    bool authenticated = false;
 
-    do{
     // ask for user
     printf("username: ");
     input = read_input();
@@ -122,16 +120,11 @@ void authenticate(int sd) {
 
     // wait to receive password requirement and check for errors
 
-    if(recv_msg(sd, USREXISTS, desc)){
-        authenticated = true;
+    if(!recv_msg(sd, USREXISTS, desc)){
+        errx(1, "error while trying to authenticate");
     }
     printf("%s\n", desc);
 
-    }while(!authenticated);
-
-    authenticated = false;
-
-    do{
     // ask for password
     printf("passwd: ");
     input = read_input();
@@ -144,12 +137,12 @@ void authenticate(int sd) {
     free(input);
     
     // wait for answer and process it and check for errors
-    if(recv_msg(sd, PASSOK, desc)){
-        authenticated = true;
-    }
+    bool res = recv_msg(sd, PASSOK, desc);
     printf("%s\n", desc);
+    if(!res){
+        errx(1, "error while trying to send password");
+    }
 
-    }while(!authenticated);
 }
 
 /**

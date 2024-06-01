@@ -7,6 +7,10 @@
 #include <unistd.h>
 #include <err.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
 #include <netinet/in.h>
 
 #define BUFSIZE 512
@@ -82,7 +86,12 @@ bool send_ans(int sd, char *message, ...){
     va_end(args);
     // send answer preformated and check errors
 
-
+    int send_s = send(sd,buffer, sizeof buffer, 0);
+    if(send_s < 0){
+        warn("error sending data");
+        return false;
+    }
+    return true;
 
 
 }
@@ -160,14 +169,26 @@ bool authenticate(int sd) {
 
     // wait to receive USER action
 
+    recv_cmd(sd,"USER", user);
 
     // ask for password
 
+    send_ans(sd,MSG_331,user);
+
     // wait to receive PASS action
+
+    recv_cmd(sd, "PASS", pass);
 
     // if credentials don't check denied login
 
+    if(!check_credentials(user, pass)){
+        send_ans(sd, MSG_530);
+        return false;
+    }
+
     // confirm login
+    send_ans(sd, MSG_230, user);
+    return true;
 }
 
 /**
@@ -181,13 +202,17 @@ void operate(int sd) {
     while (true) {
         op[0] = param[0] = '\0';
         // check for commands send by the client if not inform and exit
-
+        
+        if(!recv_cmd(sd, op, param)){
+            errx(1,"Did not recieve command");
+        }
 
         if (strcmp(op, "RETR") == 0) {
             retr(sd, param);
         } else if (strcmp(op, "QUIT") == 0) {
             // send goodbye and close connection
-
+            send_ans(sd,MSG_221);
+            close(sd);
 
 
 
@@ -213,17 +238,22 @@ int main (int argc, char *argv[]) {
     }
 
     // reserve sockets and variables space
-    int master_sd, slave_sd;
-    struct sockaddr_in master_addr, slave_addr;
+    int master_sd, slave_sd, status;
+    struct sockaddr_in slave_addr, *master_addr;
+    struct addrinfo hints, *servinfo;
 
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
 
-    // create server socket and check errors
-    memset(&master_addr, 0, sizeof master_sd);
-    master_addr.sin_family = AF_INET;
-    master_addr.sin_addr.s_addr = INADDR_ANY;
-    master_addr.sin_port = htons(atoi(argv[1]));
+    if((status = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0){
+        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        exit(1);
+    }
 
-    
+    master_addr =(struct sockaddr_in*) servinfo->ai_addr;
+
     master_sd = socket(PF_INET, SOCK_STREAM, 0);
     if(master_sd == -1) {
         perror("Socket error\n");
@@ -231,7 +261,7 @@ int main (int argc, char *argv[]) {
     }
     // bind master socket and check errors
 
-    if(bind(master_sd, (struct sockaddr *)&master_addr, sizeof(master_addr))){
+    if(bind(master_sd, (struct sockaddr *)master_addr, servinfo->ai_addrlen) < 0){
         close(master_sd);
         errx(1, "Failed to bind master socket");
     }
@@ -246,8 +276,8 @@ int main (int argc, char *argv[]) {
     // main loop
     while (true) {
         // accept connectiones sequentially and check errors
-
-        slave_sd = accept(master_sd, (struct sockaddr *) &slave_addr, (socklen_t*)sizeof(slave_addr));
+        socklen_t slave_len = sizeof(slave_addr);
+        slave_sd = accept(master_sd, (struct sockaddr *) &slave_addr, &slave_len);
         if(!fork()){
         close(master_sd);
         // send hello
@@ -257,13 +287,14 @@ int main (int argc, char *argv[]) {
             operate(slave_sd);
         }else{
             close(slave_sd);
-            return 0;
         }
+            return 0;
 
         }
     }
 
     // close server socket
-
+    freeaddrinfo(servinfo);
+    close(master_sd);
     return 0;
 }
