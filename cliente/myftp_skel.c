@@ -47,7 +47,8 @@ bool recv_msg(int sd, int code, char *text) {
 
     // parsing the code and message receive from the answer
     sscanf(buffer, "%d %[^\r\n]\r\n", &recv_code, message);
-    printf("%d %s\n", recv_code, message);
+    // If you want to see exactly what messages the server is receiving then uncomment the line below
+    //printf("%d %s\n", recv_code, message); 
     // optional copy of parameters
     if(text) strcpy(text, message);
     // boolean test for the code
@@ -75,17 +76,6 @@ void send_msg(int sd, char *operation, char *param) {
     send_s = send(sd, buffer,sizeof(buffer),0);
     if (send_s < 0) warn("error sending data");
 
-}
-
-/**
- * function: recieve a file from the server
- * sd: socket descriptor
- * file: the file in question
-*/
-void recv_file(int sd, FILE* file, long int file_size){
-    char buffer[BUFSIZE];
-    int recv_size;
-    // Preguntar
 }
 
 /**
@@ -146,6 +136,71 @@ void authenticate(int sd) {
 }
 
 /**
+ * function: Opens the data stream socket and sends the PORT command
+ * sd: socket descriptor
+ * return: returns the socket descriptor of the data stream
+ */
+int set_data(int sd){
+
+    int dd;
+    struct sockaddr_in dataPort;
+    socklen_t dataLen = sizeof(dataPort);
+    char portArgs[BUFSIZE];
+
+    dd = socket(AF_INET, SOCK_STREAM, 0);
+    if(dd < 0 ){
+        errx(1, "Error while trying to open data socket");
+    }
+
+    dataPort.sin_family = AF_INET;
+    dataPort.sin_addr.s_addr = htonl(INADDR_ANY);
+    dataPort.sin_port = htons(0); 
+    if (bind(dd, (struct sockaddr*)&dataPort, sizeof(dataPort)) < 0) {
+        errx(1, "Error while trying to bind in data");
+    }
+
+    // We retrieve the info from the socket
+    if (getsockname(dd, (struct sockaddr *)&dataPort, &dataLen) < 0) {
+        close(dd);
+        errx(1, "Error while trying to get data info");
+    }
+
+    uint32_t ip_addr = ntohl(dataPort.sin_addr.s_addr);
+    unsigned char ip[4];
+    ip[0] = (ip_addr >> 24) & 0xFF;
+    ip[1] = (ip_addr >> 16) & 0xFF;
+    ip[2] = (ip_addr >> 8) & 0xFF;
+    ip[3] = ip_addr & 0xFF;
+    uint16_t portNum = ntohs(dataPort.sin_port);
+
+    sprintf(portArgs, "%d,%d,%d,%d,%d,%d", ip[0], ip[1], ip[2], ip[3], portNum/256, portNum %256);
+
+    if(listen(dd, 1) < 0){
+        close(dd);
+        errx(1, "ERROR while trying to listen.\n");
+    }
+
+    send_msg(sd,"PORT", portArgs);
+
+    return dd;
+
+}
+
+void recv_file(int serverdd, FILE* file, long int fSize){
+    char buffer[BUFSIZE];
+    int bufLen;
+    long int received = 0;
+    for(; (bufLen = recv(serverdd, buffer, BUFSIZE, 0)) && received <= fSize; received += bufLen){
+        if(bufLen == -1){
+            warn("Error while trying to retrieve file");
+            break;
+        }
+        fwrite(buffer, sizeof(char), bufLen, file);
+    }
+    close(serverdd);
+}
+
+/**
  * function: operation get
  * sd: socket descriptor
  * file_name: file name to get from the server
@@ -154,6 +209,9 @@ void get(int sd, char *file_name) {
     char desc[BUFSIZE], buffer[BUFSIZE], text[MSGSIZE];
     long int f_size;
     FILE *file;
+
+    // Open the data stream and send PORT command
+    int dd = set_data(sd);
 
     // send the RETR command to the server
 
@@ -165,6 +223,7 @@ void get(int sd, char *file_name) {
         warn(buffer);
         return;
     }
+    printf("%s\n",buffer);
 
     // parsing the file size from the answer received
     // "File %s size %ld bytes"
@@ -174,8 +233,11 @@ void get(int sd, char *file_name) {
     file = fopen(file_name, "w");
 
     //receive the file
-
-    recv_file(sd, file, f_size);
+    struct sockaddr_in serverData;
+    socklen_t serverLen = sizeof(serverData);
+    int serverdd = accept(dd, (struct sockaddr *) &serverData, &serverLen);
+    
+    recv_file(serverdd, file, f_size);
 
     // close the file
     fclose(file);
@@ -187,6 +249,7 @@ void get(int sd, char *file_name) {
         printf("%s\n", text);
 
 }
+
 
 /**
  * function: operation quit

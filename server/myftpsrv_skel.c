@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 
 #define BUFSIZE 512
@@ -25,6 +26,28 @@
 #define MSG_550 "550 %s: no such file or directory\r\n"
 #define MSG_299 "299 File %s size %ld bytes\r\n"
 #define MSG_226 "226 Transfer complete\r\n"
+
+
+struct sockaddr_in data_stream;
+
+/**
+ * function: Sets the data stream
+ * info: the port from which the client will comunicate
+ */
+void set_data(char* info){
+    int p1, p2, h[4];
+    char client_ip[16];
+
+    // Parse the info
+    sscanf(info, "%d,%d,%d,%d,%d,%d", &h[0],&h[1],&h[2],&h[3],&p1,&p2);
+    // Format info
+    sprintf(client_ip, "%d.%d.%d.%d", h[0], h[1], h[2], h[3]);
+
+    // Set the structure
+    data_stream.sin_family = AF_INET;
+    inet_pton(AF_INET,client_ip, &data_stream.sin_addr);
+    data_stream.sin_port = htons(p1 * 256 + p2);
+}
 
 /**
  * function: receive the commands from the client
@@ -43,7 +66,10 @@ bool recv_cmd(int sd, char *operation, char *param) {
     int recv_s;
 
     // receive the command in the buffer and check for errors
+    recv_s = recv(sd, buffer , BUFSIZE, 0);
 
+    if (recv_s < 0) warn("error receiving data");
+    if (recv_s == 0) errx(1, "connection closed by host");
 
 
     // expunge the terminator characters from the buffer
@@ -97,29 +123,90 @@ bool send_ans(int sd, char *message, ...){
 }
 
 /**
+ * function: gets the socket that recieves the file to transfer
+ * return: socket to client data stream
+ */
+int get_dataDescriptor(){
+    int dd = socket(AF_INET, SOCK_STREAM, 0);
+    if(dd < 0){
+        warn("Failed to open new socket");
+        return -1;
+    }
+    if (connect(dd, (struct sockaddr*)&data_stream, sizeof(data_stream)) < 0) {
+        warn("Failed to connect to data stream");
+        close(dd);
+        return -1;
+    }
+    return dd;
+}
+
+/**
+ * function: sends the file to the client
+ * dd: data stream descriptor
+ * file: file to transfer
+ */
+void send_file(int dd, FILE *file){
+    char bread[BUFSIZE];
+    int readed;
+    while((readed = fread(&bread, sizeof(char), BUFSIZE, file)) == BUFSIZE){
+        send(dd, bread, readed, 0);
+    }
+    if(feof(file)){
+        send(dd, bread, readed, 0);
+    }
+}
+
+/**
  * function: RETR operation
  * sd: socket descriptor
  * file_path: name of the RETR file
  **/
-
 void retr(int sd, char *file_path) {
-    FILE *file;    
-    int bread;
+    FILE *file;
     long fsize;
     char buffer[BUFSIZE];
-
+    
+    // Open the file
+    file = fopen(file_path, "r");
+    
     // check if file exists if not inform error to client
+    if(!file){
+        send_ans(sd, MSG_530, file_path);
+        return;
+    }
 
+    // Get the size of the file
+    fseek(file, 0, SEEK_END);
+    fsize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
     // send a success message with the file length
+    send_ans(sd, MSG_299, file_path, fsize);
+    
 
     // important delay for avoid problems with buffer size
     sleep(1);
 
+    // Get data stream descriptor
+    int dd = get_dataDescriptor();
+
+    // If connection to data stream fails
+    // the client will also finish the operation with an error
+    if(dd < 0){
+        fclose(file);
+        return;
+    }
+
     // send the file
+    send_file(dd, file);
 
     // close the file
-
+    fclose(file);
+        
     // send a completed transfer message
+    send_ans(sd, MSG_226);
+    close(dd);
+    
 }
 /**
  * funcion: check valid credentials in ftpusers file
@@ -207,15 +294,14 @@ void operate(int sd) {
             errx(1,"Did not recieve command");
         }
 
-        if (strcmp(op, "RETR") == 0) {
+        if (strcmp(op, "PORT") == 0) {
+            set_data(param);
+        } else if (strcmp(op, "RETR") == 0){
             retr(sd, param);
-        } else if (strcmp(op, "QUIT") == 0) {
+        }else if (strcmp(op, "QUIT") == 0) {
             // send goodbye and close connection
             send_ans(sd,MSG_221);
             close(sd);
-
-
-
             break;
         } else {
             // invalid command
